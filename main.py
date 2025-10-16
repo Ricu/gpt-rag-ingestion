@@ -6,8 +6,16 @@ import time
 import subprocess
 import jsonschema
 import uvicorn
+from pathlib import Path
+from dotenv import load_dotenv
 from tzlocal import get_localzone
 from zoneinfo import ZoneInfo
+
+# Load environment variables from .env file if it exists (for local development)
+env_file = Path(__file__).parent / '.env'
+if env_file.exists():
+    load_dotenv(env_file, override=False)
+    logging.info(f"Loaded environment variables from {env_file}")
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger

@@ -1,2 +1,2 @@
 APPLICATION_INSIGHTS_CONNECTION_STRING = "APPLICATIONINSIGHTS_CONNECTION_STRING"
-APP_NAME = "gpt-rag-ingestion"
+APP_NAME = "azure-sample-ingestion-pipeline"
