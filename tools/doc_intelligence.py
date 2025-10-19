@@ -6,12 +6,9 @@ import logging
 import requests
 from urllib.parse import urlparse, unquote
 from azure.identity import ManagedIdentityCredential, AzureCliCredential, ChainedTokenCredential
+from azure.core.credentials import AzureKeyCredential
 from azure.storage.blob import BlobServiceClient
 from azure.core.exceptions import ClientAuthenticationError, ResourceNotFoundError
-
-from dependencies import get_config
-
-app_config_client = get_config()
 
 class DocumentIntelligenceClient:
     """
@@ -20,22 +17,22 @@ class DocumentIntelligenceClient:
 
     def __init__(self):
         # AI service resource endpoint
-        self.service_endpoint = app_config_client.get('AI_FOUNDRY_ACCOUNT_ENDPOINT')
-        logging.debug(f"[docintelligence] AI_FOUNDRY_ACCOUNT_ENDPOINT = {self.service_endpoint!r}")
+        self.service_endpoint = os.environ.get('AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT')
+        logging.debug(f"[docintelligence] AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT = {self.service_endpoint!r}")
         if not self.service_endpoint:
-            logging.error("[docintelligence] 'AI_FOUNDRY_ACCOUNT_ENDPOINT' not set.")
-            raise EnvironmentError("The environment variable 'AI_FOUNDRY_ACCOUNT_ENDPOINT' is not set.")
+            logging.error("[docintelligence] 'AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT' not set.")
+            raise EnvironmentError("The environment variable 'AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT' is not set.")
         self.service_endpoint = self.service_endpoint.rstrip('/')
 
         # API configuration
         self.DOCINT_40_API = '2023-10-31-preview'
         self.DEFAULT_API_VERSION = '2024-11-30'
-        self.api_version = app_config_client.get('DOC_INTELLIGENCE_API_VERSION', self.DEFAULT_API_VERSION)
+        self.api_version = os.environ.get('DOC_INTELLIGENCE_API_VERSION', self.DEFAULT_API_VERSION)
         logging.debug(f"[docintelligence] DOC_INTELLIGENCE_API_VERSION = {self.api_version!r}")
         self.docint_40_api = self.api_version >= self.DOCINT_40_API
 
         # Network isolation
-        self.network_isolation = app_config_client.get('NETWORK_ISOLATION', 'false').lower() == 'true'
+        self.network_isolation = os.environ.get('NETWORK_ISOLATION', 'false').lower() == 'true'
         logging.debug(f"[docintelligence] NETWORK_ISOLATION = {self.network_isolation}")
 
         # File types and service type
@@ -51,20 +48,6 @@ class DocumentIntelligenceClient:
 
         logging.info(f"[docintelligence] Initialized with endpoint={self.service_endpoint!r}, "
                      f"api_version={self.api_version!r}, network_isolation={self.network_isolation}")
-
-        # Credential
-        try:
-            client_id = os.environ.get('AZURE_CLIENT_ID', None)
-
-            # Prefer Azure CLI locally to avoid IMDS probes; fall back to MI when available
-            self.credential = ChainedTokenCredential(
-                AzureCliCredential(),
-                ManagedIdentityCredential(client_id=client_id)
-            )
-            logging.debug("[docintelligence] ChainedTokenCredential initialized (CLI first, then MI).")
-        except Exception as e:
-            logging.error(f"[docintelligence] Credential init failed: {e}")
-            raise
 
     def _get_file_extension(self, filepath):
         clean = filepath.split('?')[0]
@@ -118,12 +101,12 @@ class DocumentIntelligenceClient:
 
         # Get token
         try:
-            token = self.credential.get_token(
-                "https://cognitiveservices.azure.com/.default"
-            ).token
-            logging.debug(f"[docintelligence][{filename}] Acquired token length={len(token)}")
+            # token = self.credential.get_token(
+            #     "https://cognitiveservices.azure.com/.default"
+            # ).token
+            # logging.debug(f"[docintelligence][{filename}] Acquired token length={len(token)}")
             headers = {
-                "Authorization": f"Bearer {token}",
+                "Ocp-Apim-Subscription-Key": os.getenv("AZURE_DOCUMENT_INTELLIGENCE_KEY"),
                 "x-ms-useragent": "gpt-rag/1.0.0",
                 "Content-Type": "application/json"
             }
@@ -166,7 +149,7 @@ class DocumentIntelligenceClient:
 
         # Polling loop
         poll_headers = {
-            "Authorization": f"Bearer {token}",
+            "Ocp-Apim-Subscription-Key": os.getenv("AZURE_DOCUMENT_INTELLIGENCE_KEY"),
             "x-ms-useragent": "gpt-rag/1.0.0",
             "Content-Type": "application/json-patch+json"
         }
@@ -213,12 +196,12 @@ class DocumentIntelligenceClient:
 
         # Get token
         try:
-            token = self.credential.get_token(
-                "https://cognitiveservices.azure.com/.default"
-            ).token
-            logging.debug(f"[docintelligence][{filename}] Acquired token length={len(token)}")
+            # token = self.credential.get_token(
+            #     "https://cognitiveservices.azure.com/.default"
+            # ).token
+            # logging.debug(f"[docintelligence][{filename}] Acquired token length={len(token)}")
             headers = {
-                "Authorization": f"Bearer {token}",
+                "Ocp-Apim-Subscription-Key": os.environ.get("AZURE_DOCUMENT_INTELLIGENCE_KEY"),
                 "x-ms-useragent": "gpt-rag/1.0.0",
                 "Content-Type": "application/json"
             }
@@ -230,7 +213,7 @@ class DocumentIntelligenceClient:
 
         # Download blob bytes
         try:
-            client = BlobServiceClient(account_url=account_url, credential=self.credential)
+            client = BlobServiceClient(os.environ.get("AZURE_STORAGE_CONNECTION_STRING"))
             blob = client.get_blob_client(container=container, blob=blob_name)
             data = blob.download_blob().readall()
             logging.debug(f"[docintelligence][{filename}] Blob downloaded, size={len(data)} bytes")
@@ -288,7 +271,7 @@ class DocumentIntelligenceClient:
 
         # Polling loop
         poll_headers = {
-            "Authorization": f"Bearer {token}",
+            "Ocp-Apim-Subscription-Key": os.getenv("AZURE_DOCUMENT_INTELLIGENCE_KEY"),
             "x-ms-useragent": "gpt-rag/1.0.0",
             "Content-Type": "application/json-patch+json"
         }
@@ -330,11 +313,8 @@ class DocumentIntelligenceClient:
         logging.debug(f"[docintelligence] Fetching figure URL: {url}")
 
         try:
-            token = self.credential.get_token(
-                "https://cognitiveservices.azure.com/.default"
-            ).token
             headers = {
-                "Authorization": f"Bearer {token}",
+                "Ocp-Apim-Subscription-Key": os.getenv("AZURE_DOCUMENT_INTELLIGENCE_KEY"),
                 "x-ms-useragent": "gpt-rag/1.0.0"
             }
             logging.debug(f"[docintelligence] Figure request headers: {headers}")

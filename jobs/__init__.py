@@ -1,5 +1,5 @@
-from .multimodal_images_purger import ImagesDeletedFilesPurger
-from .nl2sql_indexer import NL2SQLIndexer
-from .nl2sql_purger import NL2SQLPurger
-from .sharepoint_files_indexer import SharePointDocumentIngestor
-from .sharepoint_files_purger import SharePointDeletedItemsCleaner
+# from .multimodal_images_purger import ImagesDeletedFilesPurger
+# from .nl2sql_indexer import NL2SQLIndexer
+# from .nl2sql_purger import NL2SQLPurger
+# from .sharepoint_files_indexer import SharePointDocumentIngestor
+# from .sharepoint_files_purger import SharePointDeletedItemsCleaner

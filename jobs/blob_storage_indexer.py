@@ -13,13 +13,13 @@ import hashlib
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
-from azure.identity.aio import AzureCliCredential, ManagedIdentityCredential, ChainedTokenCredential
+from azure.identity.aio import DefaultAzureCredential, AzureCliCredential, ManagedIdentityCredential, ChainedTokenCredential
+from azure.core.credentials import AzureKeyCredential
 from azure.core.exceptions import HttpResponseError, ServiceRequestError
 from azure.storage.blob.aio import BlobServiceClient
 from azure.storage.blob import ContentSettings
 from azure.search.documents.aio import SearchClient as AsyncSearchClient
 
-from dependencies import get_config
 from chunking import DocumentChunker
 
 # -----------------------------------------------------------------------------
@@ -45,21 +45,8 @@ class BlobIndexerConfig:
     # Optional: allow base64 pass-through into chunker, if you change input later
     input_is_base64: bool = False
 
-    @staticmethod
-    def from_app_config():
-        app = get_config()
-        return BlobIndexerConfig(
-            search_endpoint=app.get("SEARCH_SERVICE_QUERY_ENDPOINT", ""),
-            storage_account_name=app.get("STORAGE_ACCOUNT_NAME", ""),
-            source_container=app.get("DOCUMENTS_STORAGE_CONTAINER", "documents"),
-            jobs_log_container=app.get("JOBS_LOG_CONTAINER", "jobs"),
-            blob_prefix=app.get("BLOB_PREFIX", ""),
-            search_index_name=app.get("AI_SEARCH_INDEX_NAME", app.get("SEARCH_RAG_INDEX_NAME", "")),
-            max_concurrency=int(app.get("INDEXER_MAX_CONCURRENCY", 8)),
-            batch_size=int(app.get("INDEXER_BATCH_SIZE", 500)),
-            indexer_name=app.get("BLOB_INDEXER_NAME", "blob-storage-indexer"),
-            input_is_base64=(app.get("CHUNKER_INPUT_IS_BASE64", "false").lower() in ("true", "1", "yes")),
-        )
+    # Optional: locally save intermediate results for debugging purposes
+    number_debug_files: int = 0
 
 
 # -----------------------------------------------------------------------------
@@ -108,31 +95,23 @@ class BlobStorageDocumentIndexer:
     - Writes per-file logs and a per-run summary to a Storage container.
     """
 
-    def __init__(self, cfg: Optional[BlobIndexerConfig] = None):
-        self.cfg = cfg or BlobIndexerConfig.from_app_config()
-        self._app = get_config()
-        self._credential: Optional[ChainedTokenCredential] = None
+    def __init__(self, cfg: Optional[BlobIndexerConfig]):
+        self.cfg = cfg
         self._blob_service: Optional[BlobServiceClient] = None
         self._search_client: Optional[AsyncSearchClient] = None
 
     # ---------- Clients ----------
     async def _ensure_clients(self):
-        if not self._credential:
-            client_id = os.environ.get("AZURE_CLIENT_ID", None)
-            self._credential = ChainedTokenCredential(
-                AzureCliCredential(),
-                ManagedIdentityCredential(client_id=client_id)
-            )
         if not self._blob_service:
-            acc = self.cfg.storage_account_name
-            self._blob_service = BlobServiceClient(
-                f"https://{acc}.blob.core.windows.net", credential=self._credential
-            )
+            conn = os.environ.get("AZURE_STORAGE_CONNECTION_STRING")
+            if conn:
+                self._blob_service = BlobServiceClient.from_connection_string(conn)
+
         if not self._search_client:
             self._search_client = AsyncSearchClient(
                 endpoint=self.cfg.search_endpoint,
                 index_name=self.cfg.search_index_name,
-                credential=self._credential,
+                credential=AzureKeyCredential(os.environ.get("AZURE_SEARCH_KEY")),
             )
 
     # ---------- Public entrypoint ----------
@@ -148,11 +127,12 @@ class BlobStorageDocumentIndexer:
             await self._ensure_container(self.cfg.jobs_log_container)
 
             # Load current index snapshot for dedup/TS comparisons
-            latest_map = await self._load_latest_index_state()
-            logging.info(
-                f"[{self.cfg.indexer_name}] Loaded index state for {len(latest_map)} parent_id keys"
-            )
-
+            # latest_map = await self._load_latest_index_state()
+            # logging.info(
+            #     f"[{self.cfg.indexer_name}] Loaded index state for {len(latest_map)} parent_id keys"
+            # )
+            latest_map = {}
+            
             # Enumerate blobs to consider
             container = self._blob_service.get_container_client(self.cfg.source_container)
             to_process: List[Tuple[str, datetime, str]] = []
@@ -175,9 +155,18 @@ class BlobStorageDocumentIndexer:
 
             logging.info(f"[{self.cfg.indexer_name}] Candidates: {len(to_process)}")
 
+            actual_number_debug_files = min(self.cfg.number_debug_files, len(to_process))
+            if actual_number_debug_files > 0:
+                # We sample `actual_number_debug_files` indices between 0 and len(to_process)
+                # We then add a flag wether to debug those files during processing
+                import random
+                indices_to_debug = set(random.sample(range(len(to_process)), actual_number_debug_files))
+            else:
+                indices_to_debug = set()
+
             # Process in parallel, pass run_id down
             results = await _gather_limited(
-                (self._process_one(name, lm, ctype, run_id) for (name, lm, ctype) in to_process),
+                (self._process_one(name, lm, ctype, run_id, idx in indices_to_debug) for idx, (name, lm, ctype) in enumerate(to_process)),
                 self.cfg.max_concurrency,
             )
 
@@ -229,7 +218,8 @@ class BlobStorageDocumentIndexer:
         blob_name: str,
         last_modified: datetime,
         content_type: str,
-        run_id: str
+        run_id: str,
+        debug_document : bool = False,
     ) -> Dict[str, Any]:
         await self._ensure_clients()
         parent_id = self._make_parent_id(blob_name)
@@ -279,12 +269,42 @@ class BlobStorageDocumentIndexer:
             }
 
             # Chunk (off-thread to keep event loop snappy if heavy)
-            chunks, errors, warnings = await asyncio.to_thread(DocumentChunker().chunk_documents, data)
+            chunks, errors, warnings = await asyncio.to_thread(DocumentChunker(debug_mode=debug_document).chunk_documents, data)
             if errors:
                 raise RuntimeError(f"chunker returned errors: {errors}")
 
+            
+
             # Convert chunks -> search docs
             docs = [self._to_search_doc(chunk, parent_id, file_url, blob_name, last_modified, security_ids) for chunk in chunks]
+
+            if debug_document:
+                from pathlib import Path
+                output_dir = Path.cwd() / "debug_outputs"
+                output_dir.mkdir(parents=True, exist_ok=True)
+                raw_chunks_path = output_dir / f"{data['fileName']}_raw_chunks.json"
+                with raw_chunks_path.open("w", encoding="utf-8") as f:
+                    json.dump(chunks, f)
+
+                search_chunks_path = output_dir / f"{data['fileName']}_search_chunks.json"
+                # Convert any datetime objects in docs to ISO strings for JSON serialization
+                def _serialize_datetimes(obj):
+                    if isinstance(obj, dict):
+                        return {k: _serialize_datetimes(v) for k, v in obj.items()}
+                    elif isinstance(obj, list):
+                        return [_serialize_datetimes(i) for i in obj]
+                    elif isinstance(obj, datetime):
+                        return obj.isoformat()
+                    else:
+                        return obj
+
+                docs_serializable = _serialize_datetimes(docs)
+                with search_chunks_path.open("w", encoding="utf-8") as f:
+                    json.dump(docs_serializable, f)
+
+                raw_file_path = output_dir / data["fileName"]
+                with raw_file_path.open("wb") as f:
+                    f.write(file_bytes)
 
             # Replace existing parent's docs with fresh set
             await self._replace_parent_docs(parent_id, docs)

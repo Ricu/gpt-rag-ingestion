@@ -7,9 +7,7 @@ import logging
 import openai
 import tiktoken
 from azure.identity import AzureCliCredential, ManagedIdentityCredential, ChainedTokenCredential, get_bearer_token_provider
-from dependencies import get_config
-
-app_config_client = get_config()
+from azure.core.credentials import AzureKeyCredential
 
 class AzureOpenAIClient:
     def __init__(self, document_filename: str = ""):
@@ -17,17 +15,17 @@ class AzureOpenAIClient:
         self.document_filename = f"[{document_filename}]" if document_filename else ""
 
         # Load configuration from environment
-        self.endpoint             = app_config_client.get("AI_FOUNDRY_ACCOUNT_ENDPOINT")        # e.g. "https://<your-resource>.openai.azure.com/"
-        self.api_version          = app_config_client.get("OPENAI_API_VERSION", "2024-10-21")
-        self.chat_deployment      = app_config_client.get("CHAT_DEPLOYMENT_NAME")         # deployment name in Azure OpenAI Studio
-        self.embedding_deployment = app_config_client.get("EMBEDDING_DEPLOYMENT_NAME")
+        self.endpoint             = os.environ.get("AZURE_OPENAI_ENDPOINT")        # e.g. "https://<your-resource>.openai.azure.com/"
+        self.api_version          = os.environ.get("AZURE_OPENAI_API_VERSION")
+        self.chat_deployment      = os.environ.get("AZURE_GENERATION_MODEL_DEPLOYMENT")         # deployment name in Azure OpenAI Studio
+        self.embedding_deployment = os.environ.get("AZURE_EMBEDDING_MODEL_DEPLOYMENT")
 
         # Warn if any required var is missing
         for var, val in {
-            "AI_FOUNDRY_ACCOUNT_ENDPOINT": self.endpoint,
-            "OPENAI_API_VERSION":    self.api_version,
-            "CHAT_DEPLOYMENT_NAME":  self.chat_deployment,
-            "EMBEDDING_DEPLOYMENT_NAME": self.embedding_deployment
+            "AZURE_OPENAI_ENDPOINT": self.endpoint,
+            "AZURE_OPENAI_API_VERSION":    self.api_version,
+            "AZURE_GENERATION_MODEL_DEPLOYMENT":  self.chat_deployment,
+            "AZURE_EMBEDDING_MODEL_DEPLOYMENT": self.embedding_deployment
         }.items():
             if not val:
                 logging.warning(f"[aoai]{self.document_filename} {var} is not set")
@@ -36,22 +34,11 @@ class AzureOpenAIClient:
         self.max_gpt_tokens       = 128_000
         self.max_embed_tokens     =   8_192
 
-        # Build token provider with preferred order: Azure CLI first, then Managed Identity (optional client_id)
-        client_id = os.environ.get("AZURE_CLIENT_ID", None)
-        token_provider = get_bearer_token_provider(
-            ChainedTokenCredential(
-                AzureCliCredential(),
-                ManagedIdentityCredential(client_id=client_id)
-            ),
-            "https://cognitiveservices.azure.com/.default"
-        )
-        logging.debug(f"[aoai]{self.document_filename} Obtained bearer token provider")
-
         # Instantiate Azure OpenAI client with AAD token auth
         self.client = openai.AzureOpenAI(
             azure_endpoint          = self.endpoint,
             api_version             = self.api_version,
-            azure_ad_token_provider = token_provider
+            api_key                 = os.getenv("AZURE_OPENAI_KEY"),
         )
         logging.debug(f"[aoai]{self.document_filename} AzureOpenAI client initialized with AAD token provider")
         # Token estimator for truncation

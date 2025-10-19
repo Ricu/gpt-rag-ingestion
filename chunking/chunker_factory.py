@@ -4,16 +4,13 @@ import os
 from .chunkers.doc_analysis_chunker import DocAnalysisChunker
 from .chunkers.multimodal_chunker import MultimodalChunker
 from .chunkers.langchain_chunker import LangChainChunker
-from .chunkers.spreadsheet_chunker import SpreadsheetChunker
-from .chunkers.transcription_chunker import TranscriptionChunker
-from .chunkers.json_chunker import JSONChunker
-from .chunkers.nl2sql_chunker import NL2SQLChunker
+# from .chunkers.spreadsheet_chunker import SpreadsheetChunker
+# from .chunkers.transcription_chunker import TranscriptionChunker
+# from .chunkers.json_chunker import JSONChunker
+# from .chunkers.nl2sql_chunker import NL2SQLChunker
 
 from tools import DocumentIntelligenceClient
 from utils import get_filename_from_data, get_file_extension
-from dependencies import get_config
-
-app_config_client = get_config()
 
 class ChunkerFactory:
     """Factory class to create appropriate chunker based on file extension."""
@@ -21,10 +18,10 @@ class ChunkerFactory:
     def __init__(self):
         docint_client = DocumentIntelligenceClient()
         self.docint_40_api = docint_client.docint_40_api 
-        _multimodality = app_config_client.get("MULTIMODAL", "false").lower()
+        _multimodality = os.environ.get("MULTIMODAL", "false").lower()
         self.multimodality = _multimodality in ["true", "1", "yes"]
 
-    def get_chunker(self, data):
+    def get_chunker(self, data, debug_mode: bool = False):
         """
         Get the appropriate chunker based on the file extension.
 
@@ -49,13 +46,13 @@ class ChunkerFactory:
             if self.multimodality:
                 return MultimodalChunker(data)
             else:
-                return DocAnalysisChunker(data)
+                return DocAnalysisChunker(data, debug_mode=debug_mode)
         elif extension in ('docx', 'pptx'):
             if self.docint_40_api:
                 if self.multimodality:
                     return MultimodalChunker(data)
                 else:
-                    return DocAnalysisChunker(data)
+                    return DocAnalysisChunker(data, debug_mode=debug_mode)
             else:
                 logging.info(f"[chunker_factory][{filename}] Processing 'pptx' and 'docx' files requires Doc Intelligence 4.0.")
                 raise RuntimeError("Processing 'pptx' and 'docx' files requires Doc Intelligence 4.0.")

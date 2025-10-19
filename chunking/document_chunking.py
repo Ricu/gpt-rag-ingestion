@@ -33,8 +33,8 @@ class DocumentChunker:
     - errors: A list of error messages encountered during the chunking process.
     - warnings: A list of warnings generated during the chunking process.
     """    
-    def __init__(self):
-        pass
+    def __init__(self, debug_mode: bool = False):
+        self.debug_mode = debug_mode
 
     def _error_message(self, exception=None, filename=""):
         """Generate an error message based on the error type."""
@@ -54,7 +54,7 @@ class DocumentChunker:
 
         filename = get_filename_from_data(data)
         try:
-            chunker = ChunkerFactory().get_chunker(data)
+            chunker = ChunkerFactory().get_chunker(data, debug_mode=self.debug_mode)
             chunks = chunker.get_chunks()
         except Exception as e:
             errors.append(self._error_message(exception=e, filename=filename))
@@ -103,7 +103,7 @@ class DocumentChunker:
 
             logging.info(f"[document_chunking][{filename}] chunking document.")
 
-            chunks, errors, warnings = DocumentChunker().chunk_document(data)
+            chunks, errors, warnings = DocumentChunker(debug_mode=self.debug_mode).chunk_document(data)
 
         except jsonschema.exceptions.ValidationError as e:
             error_message = f"Invalid request: {e}"

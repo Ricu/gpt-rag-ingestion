@@ -83,22 +83,22 @@ async def lifespan(app: FastAPI):
             return False
 
     # Compact authentication check: require MI or SP in Azure; locally accept SP env or `az login`.
-    def _ensure_auth_or_exit() -> None:
-        env = os.environ
-        has_mi = any(env.get(k) for k in ("IDENTITY_ENDPOINT", "MSI_ENDPOINT", "MSI_SECRET"))
-        has_sp = all(env.get(k) for k in ("AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET"))
-        has_cli = False
-        if not is_azure_environment():
-            try:
-                has_cli = subprocess.run(["az", "account", "show", "-o", "none"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
-            except Exception:
-                has_cli = False
-        if not (has_sp or has_mi or has_cli):
-            logging.warning("The service is not authenticated (run 'az login' locally, or configure Managed Identity / Service Principal in Azure). Exiting...")
-            logging.shutdown()
-            os._exit(1)
+    # def _ensure_auth_or_exit() -> None:
+    #     env = os.environ
+    #     has_mi = any(env.get(k) for k in ("IDENTITY_ENDPOINT", "MSI_ENDPOINT", "MSI_SECRET"))
+    #     has_sp = all(env.get(k) for k in ("AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET"))
+    #     has_cli = False
+    #     if not is_azure_environment():
+    #         try:
+    #             has_cli = subprocess.run(["az", "account", "show", "-o", "none"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+    #         except Exception:
+    #             has_cli = False
+    #     if not (has_sp or has_mi or has_cli):
+    #         logging.warning("The service is not authenticated (run 'az login' locally, or configure Managed Identity / Service Principal in Azure). Exiting...")
+    #         logging.shutdown()
+    #         os._exit(1)
 
-    _ensure_auth_or_exit()
+    # _ensure_auth_or_exit()
 
     # Reduce Azure SDK noise in local/dev logs
     def _quiet_azure_sdks():

@@ -1,0 +1,1 @@
+See here: https://github.com/Azure/GPT-RAG/blob/a463d68a4fe7ac945980b5554254620d98a56188/infra/main.bicep#L3430C61-L3430C62

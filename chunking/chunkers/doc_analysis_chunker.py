@@ -1,14 +1,12 @@
 import logging
 import os
 import re
+from pathlib import Path
 
 from langchain_text_splitters import MarkdownTextSplitter, RecursiveCharacterTextSplitter
 from .base_chunker import BaseChunker
 from ..exceptions import UnsupportedFormatError
 from tools import DocumentIntelligenceClient
-from dependencies import get_config
-
-app_config_client = get_config()
 
 class DocAnalysisChunker(BaseChunker):
     """
@@ -53,13 +51,14 @@ class DocAnalysisChunker(BaseChunker):
     and handling general exceptions.
     - The chunking process's progress and outcomes, including the number of chunks created or skipped, are logged.
     """
-    def __init__(self, data, max_chunk_size=None, minimum_chunk_size=None, token_overlap=None):
+    def __init__(self, data, max_chunk_size=None, minimum_chunk_size=None, token_overlap=None, debug_mode: bool = False):
         super().__init__(data)       
-        self.max_chunk_size = max_chunk_size or int(app_config_client.get("CHUNKING_NUM_TOKENS", 2048))
-        self.minimum_chunk_size = minimum_chunk_size or int(app_config_client.get("CHUNKING_MIN_CHUNK_SIZE", 100))
-        self.token_overlap = token_overlap or int(app_config_client.get("TOKEN_OVERLAP", 100))
+        self.max_chunk_size = max_chunk_size or int(os.environ.get("CHUNKING_NUM_TOKENS", 2048))
+        self.minimum_chunk_size = minimum_chunk_size or int(os.environ.get("CHUNKING_MIN_CHUNK_SIZE", 100))
+        self.token_overlap = token_overlap or int(os.environ.get("TOKEN_OVERLAP", 100))
         self.docint_client = DocumentIntelligenceClient()
         self.supported_formats = self.docint_client.file_extensions
+        self.debug_mode = debug_mode
 
     def get_chunks(self):
         """
@@ -87,8 +86,16 @@ class DocAnalysisChunker(BaseChunker):
             formatted_errors = ', '.join(map(str, analysis_errors))
             raise Exception(f"Error in doc_analysis_chunker analyzing {self.filename}: {formatted_errors}")
 
+        
         chunks = self._process_document_chunks(document)
         
+        if self.debug_mode:
+            output_dir = Path.cwd() / "debug_outputs"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            complete_document_path = output_dir / f"{self.filename}_complete_document.md"
+            with complete_document_path.open("w", encoding="utf-8") as f:
+                f.write(document["content"])
+                
         return chunks
 
     def _analyze_document_with_retry(self, retries=3):
