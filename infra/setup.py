@@ -73,6 +73,8 @@ AGENTIC_API_VERSION = "2025-08-01-preview"
 #     except Exception as e:
 #         logging.error(f"Error listing App Configuration settings: {e}")
 #     return ctx
+from dotenv import load_dotenv
+load_dotenv()
 
 # ── Template Rendering ─────────────────────────────────────────────────────-
 def prepare_context_and_render(template_name: str, template_dir: str, label_filter: str = LABEL_FILTER) -> Tuple[Optional[dict], dict]:

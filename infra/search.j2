@@ -27,7 +27,9 @@
         { "name": "relatedFiles",                   "type": "Collection(Edm.String)",   "searchable": false, "retrievable": true },
         { "name": "source",                         "type": "Edm.String",               "searchable": false, "retrievable": true,  "filterable": true },
         { "name": "contentVector",                  "type": "Collection(Edm.Single)",   "searchable": true,  "retrievable": {% if ENABLE_AGENTIC_RETRIEVAL == 'true' %}false{% else %}true{% endif %},  "dimensions": "{{EMBEDDINGS_VECTOR_DIMENSIONS}}", "vectorSearchProfile": "default" },
-        { "name": "captionVector",                  "type": "Collection(Edm.Single)",   "searchable": true,  "retrievable": {% if ENABLE_AGENTIC_RETRIEVAL == 'true' %}false{% else %}true{% endif %},  "dimensions": "{{EMBEDDINGS_VECTOR_DIMENSIONS}}", "vectorSearchProfile": "default" }
+        { "name": "captionVector",                  "type": "Collection(Edm.Single)",   "searchable": true,  "retrievable": {% if ENABLE_AGENTIC_RETRIEVAL == 'true' %}false{% else %}true{% endif %},  "dimensions": "{{EMBEDDINGS_VECTOR_DIMENSIONS}}", "vectorSearchProfile": "default" },
+        { "name": "productFamily",                  "type": "Edm.String",               "searchable": false,  "retrievable": true,  "filterable": true },
+        { "name": "productCategory",                "type": "Edm.String",               "searchable": false,  "retrievable": true,  "filterable": true }
       ],
       "corsOptions": {
         "allowedOrigins": ["*"],

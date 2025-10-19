@@ -3,6 +3,7 @@ import asyncio
 import time
 import inspect
 import base64
+import csv
 import dataclasses
 import json
 import logging
@@ -12,6 +13,7 @@ import ast
 import hashlib
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from pathlib import Path
 
 from azure.identity.aio import DefaultAzureCredential, AzureCliCredential, ManagedIdentityCredential, ChainedTokenCredential
 from azure.core.credentials import AzureKeyCredential
@@ -21,6 +23,60 @@ from azure.storage.blob import ContentSettings
 from azure.search.documents.aio import SearchClient as AsyncSearchClient
 
 from chunking import DocumentChunker
+
+csv_file_path = Path(__file__).parent / "ecovacs_models_v3.csv"
+with csv_file_path.open("r", encoding="utf-8") as f:
+    reader = csv.DictReader(f)
+    PRODUCT_FAMILY_DATA = [row for row in reader]
+
+# model_name: Deebot X11 Pro Omni
+# product_category: Deebot
+# product_family: X11
+
+def determine_product_category(file_name: str) -> str:
+    categories = set(["deebot", "winbot", "goat","airbot"])
+    file_name = file_name.lower()
+    for row in PRODUCT_FAMILY_DATA:
+        family = row["lexicon_key"]
+        if (
+            family not in file_name
+            and family.replace("_", "").replace("-", "").replace(" ", "") not in file_name.replace("_", "").replace("-", "").replace(" ", "")
+        ):
+            continue
+        for category in categories:
+            if category in row["synonyms"].lower():
+                return category
+            if category in family.lower():
+                return category
+    return "no_product_category"
+
+def determine_product_family(file_name: str) -> str:
+    file_name = file_name.lower()
+    for row in PRODUCT_FAMILY_DATA:
+        family = row["lexicon_key"]
+        if family in file_name:
+            return family
+        if family.replace("_", "").replace("-", "").replace(" ", "") in file_name.replace("_", "").replace("-", "").replace(" ", ""):
+            return family
+    return "no_product_family"
+
+# test_file_names = [
+#     "023149_6306-X2OMNIInstructionManual.pdf",
+#     "084807_7735$N20PLUSN20PROPlus-AMR.pdf",
+#     "100841_6230-T30Combo-US.pdf"
+# ]
+
+# parsed_model_data = []
+
+# for file_name in test_file_names:
+#     product_family = determine_product_family(file_name)
+#     product_category = determine_product_category(file_name)
+#     parsed_model_data.append({
+#         "file_name": file_name,
+#         "product_family": product_family,
+#         "product_category": product_category
+#     })
+
 
 # -----------------------------------------------------------------------------
 # Configuration wrapper
@@ -336,9 +392,11 @@ class BlobStorageDocumentIndexer:
         last_modified: datetime,
         security_ids: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
+
         # Azure Search key must be unique & stable per chunk
         chunk_id = int(chunk.get("chunk_id", 0))
         key = self._make_chunk_key(parent_id, chunk_id)
+        product_family, product_category = self._parse_product_info(chunk.get("title", ""))
         return {
             "id": key,
             "parent_id": parent_id,
@@ -362,6 +420,8 @@ class BlobStorageDocumentIndexer:
             "source": "blob",
             "contentVector": chunk.get("contentVector", []),
             "captionVector": chunk.get("captionVector", []),
+            "productFamily": product_family,
+            "productCategory": product_category,
         }
 
     # ---------- Index state & (re)write ----------
@@ -559,6 +619,11 @@ class BlobStorageDocumentIndexer:
             if tt:
                 cleaned.append(tt)
         return cleaned
+    
+    def _parse_product_info(self, file_name: str) -> Tuple[str, str]:
+        product_family = determine_product_family(file_name)
+        product_category = determine_product_category(file_name)
+        return product_family, product_category
 
 
 # -----------------------------------------------------------------------------
